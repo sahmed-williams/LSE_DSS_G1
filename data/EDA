@@ -1,0 +1,359 @@
+---
+title: "DSS Project"
+author: "Cara Spitzer"
+date: "2025-11-16"
+output: word_document
+---
+
+#Set up 
+
+```{r setup}
+
+setwd("C:/Users/Admin/OneDrive/LSE/extra/Data Science")
+
+#install.packages("gridExtra")
+
+library(tidyverse)
+library(lubridate) 
+library(scales)
+library(gridExtra)
+
+```
+
+## Data prep
+Harmonize the data sets of each asset
+
+```{r cars}
+
+
+CLF = read.csv("CL_F.csv")%>%
+  rename(fed_date = FOMC_Date,
+         high = High,
+         low = Low,
+         close = Close,
+         volume = Volume,
+         open = Open,
+         symbol = Ticker,
+         timestamp = Date)
+
+fed_date_v = unique(CLF$fed_date)
+print(fed_date_v)
+
+bitcoin = read.csv("bitcoin.csv")%>%
+  filter(fed_date %in% fed_date_v)
+
+gold = read.csv("GLD.csv")%>%
+  rename(fed_date = FOMC_Date,
+         high = High,
+         low = Low,
+         close = Close,
+         volume = Volume,
+         open = Open,
+         symbol = Ticker,
+         timestamp = Date)
+
+c_energy = read.csv("ICLN.csv")%>%
+  rename(fed_date = FOMC_Date)
+
+SPY= read.csv("SPY.csv")%>%
+  rename(fed_date = announcement_date)
+
+dollar = read.csv("UUP.csv")%>%
+  rename(fed_date = FOMC_Date,
+         high = High,
+         low = Low,
+         close = Close,
+         volume = Volume,
+         open = Open,
+         symbol = Ticker,
+         timestamp = Date)
+
+energy = read.csv("XLE.csv")%>%
+  rename(fed_date = FOMC_Date)
+
+ZN = read.csv("ZN_F.csv")%>%
+  rename(fed_date = announcement_date)
+
+all_assets = bind_rows(
+  bitcoin,
+  CLF,
+  gold,
+  c_energy,
+  SPY,
+  dollar,
+  energy,
+  ZN
+  
+)
+
+all_assets_clean = all_assets%>%
+  select(-c("Adj.Close", "Event_Trading_Day"))%>%
+   mutate(
+    timestamp = as_date(timestamp),
+    fed_date = as_date(fed_date)
+  )
+
+all_assets_return = all_assets_clean%>%
+  group_by(symbol) %>%
+  arrange(timestamp) %>%
+  mutate(
+    daily_return = (close - lag(close))/lag(close) * 100
+  ) %>%
+  ungroup()
+
+```
+
+## Summary Statistics
+
+Summary of asset prices (closes) and return from 2020-2025 around the FED announcements.
+
+```{r pressure}
+
+##Comment: Maybe not the best timeframe, because of Covid- might be different curcumstances
+
+#---price---#
+
+summary_prices = all_assets_clean %>%
+  group_by(symbol) %>%
+  summarise(
+    n_FOMC = n_distinct(fed_date),
+    min_close = min(close, na.rm = TRUE),
+    max_close = max(close, na.rm = TRUE),
+    avg_close = mean(close, na.rm = TRUE),
+    sd_close = sd(close, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(symbol)
+
+print(summary_prices)
+
+#---Return---#
+
+summary_return = all_assets_return%>%
+  summarise(
+    n_fed_announcements = n_distinct(fed_date),
+    avg_return = mean(daily_return, na.rm = TRUE),
+    sd_return = sd(daily_return, na.rm = TRUE),
+    min_return = min(daily_return, na.rm = TRUE),
+    max_return = max(daily_return, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(summary_return)
+
+
+```
+
+#Time series
+
+Development overtime around the fed announcements (dashed line) of prices and returns sperated by assets.
+
+```{r, time series}
+
+#Prices
+
+plot_prices = ggplot(all_assets_clean, aes(x = timestamp, y = close)) +
+  geom_line(color = "#2E86AB", linewidth = 0.6) +
+  geom_vline(xintercept = as.Date(fed_date_v), 
+             color = "#A23B72", alpha = 0.3, linetype = "dashed", linewidth = 0.3) +
+  facet_wrap(~ symbol, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Prices across asset groups (2020-2025)",
+    subtitle = "Vertical line: FOMC-Announcements",
+    x = "",
+    y = "Close",
+    caption = "Floating scales"
+  ) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "gray30"),
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  )
+
+print(plot_prices)
+
+#Returns
+
+plot_returns = ggplot(all_assets_return, aes(x = timestamp, y = close)) +
+  geom_line(color = "#2E86AB", linewidth = 0.6) +
+  geom_vline(xintercept = as.Date(fed_date_v), 
+             color = "#A23B72", alpha = 0.3, linetype = "dashed", linewidth = 0.3) +
+  facet_wrap(~ symbol, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Returns across asset groups (2020-2025)",
+    subtitle = "Vertical line: FOMC-Announcements",
+    x = "",
+    y = "Close",
+    caption = "Floating scales"
+  ) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "gray30"),
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  )
+
+print(plot_returns)
+
+
+```
+#Cumulative Returns 
+The cumulative returns after the announcement.
+
+```{r}
+
+##Prepare
+
+all_assets_event = all_assets_return%>%
+  mutate( days_from_fomc = as.numeric(timestamp -fed_date))%>%
+  ungroup()
+
+event_window = all_assets_event %>%
+  filter(days_from_fomc >= 0 & days_from_fomc <= 5)
+
+##cumulative returns
+
+cumulative_returns = event_window %>%
+  group_by(symbol, fed_date) %>%
+  arrange(timestamp) %>%
+  mutate(cumulative_return = cumsum(daily_return)
+  ) %>%
+  ungroup()
+
+##avg
+
+avg_cumulative = cumulative_returns %>%
+  group_by(symbol, days_from_fomc) %>%
+  summarise(
+    avg_cum_return = mean(cumulative_return, na.rm = TRUE),
+    sd_cum_return = sd(cumulative_return, na.rm = TRUE),
+    n_events = n(),
+    .groups = "drop"
+  )
+
+##graph
+
+plot_cumulative_all = ggplot(avg_cumulative, 
+                              aes(x = days_from_fomc, y = avg_cum_return,color = symbol, group = symbol))+
+  geom_line(linewidth = 1.3) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray30", linewidth = 0.6) +
+  labs(
+    title = "Cumulative Returns after FOMC Announcements",
+    subtitle = "Average across all FOMC events (2020-2025)",
+    x = "Days since FOMC Announcement",
+    y = "Cumulative Return (%)",
+    color = "Asset Group",
+    caption = "Day 0 = FOMC Announcement Day"
+  ) +
+  scale_x_continuous(breaks = 0:5) +
+  scale_color_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11, color = "gray30"),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text = element_text(size = 10),
+    legend.position = "right",
+    legend.title = element_text(face = "bold", size = 11),
+    legend.text = element_text(size = 10),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray90"),
+    plot.caption = element_text(size = 9, color = "gray50", hjust = 0)
+  )
+
+
+
+print(plot_cumulative_all)
+
+##Table
+
+table_cumulative = avg_cumulative %>%
+  select(symbol, days_from_fomc, avg_cum_return) %>%
+  pivot_wider(
+    names_from = days_from_fomc,
+    values_from = avg_cum_return,
+    names_prefix = "Day_"
+  ) %>%
+  arrange(symbol)
+
+print(table_cumulative)
+
+```
+
+
+#Volatility 
+
+The volatility before and after the announcements on average by asset group. 
+
+```{r}
+
+volatility_data = all_assets_event %>%
+  filter(!is.na(daily_return)) %>%
+  mutate(
+    event_period = case_when(
+      days_from_fomc >= -5 & days_from_fomc <= -1 ~ "Pre-Event",
+      days_from_fomc >= 0 & days_from_fomc <= 5 ~ "Post-Event",
+      TRUE ~ "Other"
+    )
+  )
+
+volatility_stats = volatility_data %>%
+  group_by(symbol, event_period) %>%
+  summarise(
+    volatility = sd(daily_return, na.rm = TRUE),
+    mean_return = mean(daily_return, na.rm = TRUE),
+    n_observations = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(symbol, event_period)
+
+print(volatility_stats)
+
+##Graph
+
+plot_volatility_bars <- ggplot(volatility_stats, 
+                               aes(x = symbol, y = volatility, fill = event_period)) +
+  geom_col(position = "dodge", width = 0.7) +
+  geom_text(aes(label = sprintf("%.2f%%", volatility)),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5, size = 3.5, fontface = "bold") +
+  labs(
+    title = "Volatility Comparison: Pre-Event vs. Post-Event",
+    subtitle = "Standard deviation of daily returns",
+    x = "Asset Group",
+    y = "Volatility (SD of Returns in %)",
+    fill = "Period",
+    caption = "Pre-Event: 5 days before FOMC | Post-Event: FOMC day + 5 days after"
+  ) +
+  scale_fill_manual(
+    values = c("Pre-Event" = "#06A77D", "Post-Event" = "#D62246"),
+    labels = c("Pre-Event (-5 to -1)", "Post-Event (0 to +5)")
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11, color = "gray30"),
+    axis.title = element_text(face = "bold", size = 11),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold", size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+print(plot_volatility_bars)
+
+```
+
+
+
+
